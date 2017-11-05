@@ -3,11 +3,14 @@ module Main exposing (main)
 import Html exposing (Html)
 import Html.Attributes
 import Char exposing (fromCode)
-import Window as W
+import Window as W exposing (Size)
 import Task
 import Keyboard exposing (KeyCode, ups, downs)
-import Svg exposing (..)
-import Svg.Attributes exposing (..)
+import Svg
+import Svg.Attributes as SvgA
+
+
+-- MODEL
 
 
 type alias Model =
@@ -16,14 +19,20 @@ type alias Model =
     , vx : Int
     , vy : Int
     , history : List Msg
-    , windowSize : W.Size
+    , windowSize : Size
     }
 
 
 type Msg
     = KeyDown KeyCode
     | KeyUp KeyCode
-    | WindowSize W.Size
+    | WindowSize Size
+
+
+type alias Position =
+    { x : Int
+    , y : Int
+    }
 
 
 type alias KeyBindings =
@@ -54,6 +63,10 @@ initModel =
     }
 
 
+
+-- UPDATE
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -66,7 +79,7 @@ update msg model =
                 ! []
 
         WindowSize { width, height } ->
-            { model | windowSize = W.Size width height }
+            { model | windowSize = Size width height }
                 ! []
 
 
@@ -94,27 +107,79 @@ updateMotion model ( keycode, act ) =
             model
 
 
+
+-- VIEW
+
+
 (=>) : a -> a -> ( a, a )
 (=>) =
     (,)
 
 
+px : Int -> String
+px x =
+    toString x ++ "px"
+
+
 view : Model -> Html Msg
 view model =
+    let
+        pos =
+            Position
+                (model.windowSize.width // 2)
+                (model.windowSize.height // 2)
+    in
+        Html.div
+            [ Html.Attributes.style <|
+                [ "width" => (model.windowSize.width |> toString) ++ "px"
+                , "height" => (model.windowSize.height |> toString) ++ "px"
+                , "display" => "block"
+                , "background-color" => "#2d2d2d"
+                  -- , "align-items" => "center"
+                  -- , "justify-content" => "center"
+                  -- , "display" => "flex"
+                ]
+            ]
+            [ circle 30 pos ]
+
+
+circle : Int -> Position -> Html msg
+circle r pos =
     Html.div
         [ Html.Attributes.style <|
-            [ ("width" => "500px")
-            , ("height" => "500px")
+            [ "width" => px (r * 2)
+            , "height" => px (r * 2)
+            , "position" => "absolute"
+            , "left" => px (pos.x - r)
+            , "top" => px (pos.y - r)
             ]
         ]
-        [ roundedRect ]
+        [ Svg.svg
+            [ SvgA.viewBox "0 0 100 100"
+            ]
+            [ Svg.circle
+                [ SvgA.cx "50"
+                , SvgA.cy "50"
+                , SvgA.r "50"
+                , SvgA.fill "lightblue"
+                ]
+                []
+              --, Svg.rect
+              --   [ SvgA.cx (toString pos.x)
+              --   , SvgA.cy (toString pos.y)
+              --   , SvgA.width "100%"
+              --   , SvgA.height "100%"
+              --   , SvgA.rx "100"
+              --   , SvgA.ry "100"
+              --   , SvgA.fill "lightgreen"
+              --   ]
+              --   []
+            ]
+        ]
 
 
-roundedRect : Html.Html msg
-roundedRect =
-    svg
-        [ width "120", height "120", viewBox "0 0 120 120", fill "blue" ]
-        [ rect [ x "10", y "10", width "100", height "100", rx "15", ry "15" ] [] ]
+
+-- SUBSCRIPTIONS
 
 
 subscriptions : Model -> Sub Msg
@@ -126,11 +191,15 @@ subscriptions _ =
         ]
 
 
+
+-- MAIN
+
+
 main : Program Never Model Msg
 main =
     Html.program
         { init = ( initModel, Task.perform WindowSize W.size )
         , view = view
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = subscriptions
         , update = update
         }
