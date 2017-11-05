@@ -18,7 +18,7 @@ type alias Model =
     { pos : Position
     , size : Int
     , vel : Vec2
-    , history : List Msg
+    , history : List Record
     , windowSize : Size
     }
 
@@ -32,6 +32,13 @@ type Msg
 type KeyEvent
     = KeyDown KeyCode
     | KeyUp KeyCode
+
+
+type alias Record =
+    { pos : Position
+    , vel : Vec2
+    , msg : Msg
+    }
 
 
 type alias Position =
@@ -97,7 +104,7 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         KeyMsg keyEvent ->
-            (updateMotion model keyEvent |> updatePos 1)
+            (model |> recHist msg |> updateMotion keyEvent |> updatePos 1)
                 ! []
 
         WindowSize { width, height } ->
@@ -105,13 +112,21 @@ update msg model =
                 ! []
 
         Tick dt ->
-            updatePos dt model
+            (model |> recHist msg |> updatePos dt)
                 ! []
 
 
-recHist : Model -> Msg -> Model
-recHist model msg =
-    { model | history = msg :: model.history }
+recHist : Msg -> Model -> Model
+recHist msg model =
+    { model | history = (toRecord msg model) :: model.history }
+
+
+toRecord : Msg -> Model -> Record
+toRecord msg model =
+    { pos = model.pos
+    , vel = model.vel
+    , msg = msg
+    }
 
 
 updatePos : Float -> Model -> Model
@@ -143,8 +158,8 @@ updatePos dt model =
         }
 
 
-updateMotion : Model -> KeyEvent -> Model
-updateMotion model keyEvent =
+updateMotion : KeyEvent -> Model -> Model
+updateMotion keyEvent model =
     let
         ( speed, keycode ) =
             case keyEvent of
@@ -246,13 +261,20 @@ circle r pos =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch
-        [ ups (\x -> KeyMsg (KeyUp x))
-        , downs (\x -> KeyMsg (KeyDown x))
-        , W.resizes WindowSize
-        , AnimationFrame.diffs Tick
-        ]
+subscriptions model =
+    let
+        tickIfMoving =
+            if model.vel /= Vec2 0 0 then
+                [ AnimationFrame.diffs Tick ]
+            else
+                []
+    in
+        Sub.batch <|
+            [ ups (\x -> KeyMsg (KeyUp x))
+            , downs (\x -> KeyMsg (KeyDown x))
+            , W.resizes WindowSize
+            ]
+                ++ tickIfMoving
 
 
 
