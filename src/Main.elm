@@ -2,7 +2,8 @@ module Main exposing (main)
 
 import Html exposing (Html)
 import Html.Attributes
-import Char exposing (fromCode)
+import AnimationFrame
+import Char exposing (toCode)
 import Window as W exposing (Size)
 import Task
 import Keyboard exposing (KeyCode, ups, downs)
@@ -14,19 +15,23 @@ import Svg.Attributes as SvgA
 
 
 type alias Model =
-    { x : Int
-    , y : Int
-    , vx : Int
-    , vy : Int
+    { pos : Position
+    , size : Int
+    , vel : Vec2
     , history : List Msg
     , windowSize : Size
     }
 
 
 type Msg
+    = KeyMsg KeyEvent
+    | WindowSize Size
+    | Tick Float
+
+
+type KeyEvent
     = KeyDown KeyCode
     | KeyUp KeyCode
-    | WindowSize Size
 
 
 type alias Position =
@@ -35,29 +40,50 @@ type alias Position =
     }
 
 
+type alias Vec2 =
+    { x : Int
+    , y : Int
+    }
+
+
 type alias KeyBindings =
-    { moveUp : Char
-    , moveDown : Char
-    , moveLeft : Char
-    , moveRight : Char
+    { moveUp : List Int
+    , moveDown : List Int
+    , moveLeft : List Int
+    , moveRight : List Int
     }
 
 
 keyBindings : KeyBindings
 keyBindings =
-    { moveUp = 'K'
-    , moveDown = 'J'
-    , moveLeft = 'H'
-    , moveRight = 'L'
+    { moveUp =
+        [ toCode 'K'
+          -- Arrow up
+        , 38
+        ]
+    , moveDown =
+        [ toCode 'J'
+          -- Arrow down
+        , 40
+        ]
+    , moveLeft =
+        [ toCode 'H'
+          -- Arrow left
+        , 37
+        ]
+    , moveRight =
+        [ toCode 'L'
+          -- Arrow right
+        , 39
+        ]
     }
 
 
 initModel : Model
 initModel =
-    { x = 0
-    , y = 0
-    , vx = 0
-    , vy = 0
+    { pos = Position 0 0
+    , size = 50
+    , vel = { x = 0, y = 0 }
     , history = []
     , windowSize = { width = 400, height = 400 }
     }
@@ -70,39 +96,91 @@ initModel =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        KeyDown key ->
-            updateMotion model ( key, True )
-                ! []
-
-        KeyUp key ->
-            updateMotion model ( key, False )
+        KeyMsg keyEvent ->
+            (updateMotion model keyEvent |> updatePos 1)
                 ! []
 
         WindowSize { width, height } ->
             { model | windowSize = Size width height }
                 ! []
 
+        Tick dt ->
+            updatePos dt model
+                ! []
 
-updateMotion : Model -> ( KeyCode, Bool ) -> Model
-updateMotion model ( keycode, act ) =
+
+recHist : Model -> Msg -> Model
+recHist model msg =
+    { model | history = msg :: model.history }
+
+
+updatePos : Float -> Model -> Model
+updatePos dt model =
     let
-        vel =
-            if act then
-                5
-            else
-                0
+        perSec x =
+            (x |> toFloat) * dt |> round
 
-        key =
-            fromCode keycode
+        dvx =
+            perSec model.vel.x
+
+        dvy =
+            perSec model.vel.y
+
+        padded begin end padding x =
+            clamp (begin + padding) (end - padding) x
+
+        bound range x =
+            padded 0 range ((model.size // 2) + 10) x
+
+        bounded x y =
+            Position
+                (bound model.windowSize.width x)
+                (bound model.windowSize.height y)
     in
-        if key == keyBindings.moveUp then
-            { model | vy = vel }
-        else if key == keyBindings.moveDown then
-            { model | vy = -vel }
-        else if key == keyBindings.moveLeft then
-            { model | vx = -vel }
-        else if key == keyBindings.moveRight then
-            { model | vx = vel }
+        { model
+            | pos =
+                bounded (model.pos.x + dvx) (model.pos.y + dvy)
+        }
+
+
+updateMotion : Model -> KeyEvent -> Model
+updateMotion model keyEvent =
+    let
+        ( speed, keycode ) =
+            case keyEvent of
+                KeyDown key ->
+                    ( 1, key )
+
+                KeyUp key ->
+                    ( -1, key )
+
+        isAction x =
+            List.any ((==) keycode) x
+
+        addVel x y =
+            { model
+                | vel =
+                    { x =
+                        if model.vel.x /= x then
+                            model.vel.x + x
+                        else
+                            model.vel.x
+                    , y =
+                        if model.vel.y /= y then
+                            model.vel.y + y
+                        else
+                            model.vel.y
+                    }
+            }
+    in
+        if isAction keyBindings.moveUp then
+            addVel 0 -speed
+        else if isAction keyBindings.moveDown then
+            addVel 0 speed
+        else if isAction keyBindings.moveLeft then
+            addVel -speed 0
+        else if isAction keyBindings.moveRight then
+            addVel speed 0
         else
             model
 
@@ -125,22 +203,17 @@ view : Model -> Html Msg
 view model =
     let
         pos =
-            Position
-                (model.windowSize.width // 2)
-                (model.windowSize.height // 2)
+            Position model.pos.x model.pos.y
     in
         Html.div
             [ Html.Attributes.style <|
-                [ "width" => (model.windowSize.width |> toString) ++ "px"
-                , "height" => (model.windowSize.height |> toString) ++ "px"
+                [ "width" => ((model.windowSize.width |> toString) ++ "px")
+                , "height" => ((model.windowSize.height |> toString) ++ "px")
                 , "display" => "block"
                 , "background-color" => "#2d2d2d"
-                  -- , "align-items" => "center"
-                  -- , "justify-content" => "center"
-                  -- , "display" => "flex"
                 ]
             ]
-            [ circle 30 pos ]
+            [ circle (model.size // 2) pos ]
 
 
 circle : Int -> Position -> Html msg
@@ -164,16 +237,6 @@ circle r pos =
                 , SvgA.fill "lightblue"
                 ]
                 []
-              --, Svg.rect
-              --   [ SvgA.cx (toString pos.x)
-              --   , SvgA.cy (toString pos.y)
-              --   , SvgA.width "100%"
-              --   , SvgA.height "100%"
-              --   , SvgA.rx "100"
-              --   , SvgA.ry "100"
-              --   , SvgA.fill "lightgreen"
-              --   ]
-              --   []
             ]
         ]
 
@@ -185,9 +248,10 @@ circle r pos =
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.batch
-        [ ups KeyUp
-        , downs KeyDown
+        [ ups (\x -> KeyMsg (KeyUp x))
+        , downs (\x -> KeyMsg (KeyDown x))
         , W.resizes WindowSize
+        , AnimationFrame.diffs Tick
         ]
 
 
