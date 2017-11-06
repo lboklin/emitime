@@ -19,7 +19,7 @@ type alias MetaModel =
     { model : Model
     , history : List ( Model, Msg )
     , rewinding : Bool
-    , recordLength : Time
+    , recordedTime : Time
     , windowSize : Size
     }
 
@@ -29,7 +29,7 @@ initMetaModel =
     { model = initModel
     , history = []
     , rewinding = False
-    , recordLength = 5
+    , recordedTime = 10
     , windowSize = { width = 400, height = 400 }
     }
 
@@ -142,6 +142,10 @@ update msg metaModel =
         ( processedMetaModel, Cmd.none )
 
 
+
+-- React to keyboard input
+
+
 withKeyInput : KeyEvent -> MetaModel -> MetaModel
 withKeyInput keyEvent metaModel =
     let
@@ -153,13 +157,17 @@ withKeyInput keyEvent metaModel =
                 if isAction keyBindings.rewind key then
                     { metaModel | rewinding = True }
                 else
-                    (metaModel |> pushHist msg |> updateMotion keyEvent)
+                    (metaModel |> modelToHistory msg |> withMotionInput keyEvent)
 
             KeyUp key ->
                 if isAction keyBindings.rewind key then
                     { metaModel | rewinding = False }
                 else
-                    (metaModel |> pushHist msg |> updateMotion keyEvent)
+                    (metaModel |> modelToHistory msg |> withMotionInput keyEvent)
+
+
+
+-- Update meta model in regards to time
 
 
 withTime : Time -> MetaModel -> MetaModel
@@ -181,14 +189,18 @@ withTime dt metaModel =
             if mMdl.rewinding then
                 mMdl |> stepBack
             else
-                { mMdl | model = mMdl.model |> addTime delta } |> pushHist msg
+                { mMdl | model = mMdl.model |> addTime delta } |> modelToHistory msg
     in
         metaModel |> withTimeDirection |> updatePos delta
 
 
-pushHist : Msg -> MetaModel -> MetaModel
-pushHist msg metaModel =
+modelToHistory : Msg -> MetaModel -> MetaModel
+modelToHistory msg metaModel =
     { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+
+
+
+-- Replace current model with the previous on in history and pop history
 
 
 stepBack : MetaModel -> MetaModel
@@ -208,29 +220,79 @@ stepBack metaModel =
         }
 
 
+
+-- The negative difference between current time and the time of the previous model
+
+
 timeDiffBack : List ( Model, Msg ) -> Time
 timeDiffBack hist =
     case hist of
         [] ->
             0
 
-        x :: _ ->
-            case Tuple.second x of
-                Tick dt ->
-                    dt
+        x :: xs ->
+            let
+                time a =
+                    (Tuple.first a).time
+            in
+                case xs of
+                    [] ->
+                        time x
 
-                _ ->
-                    0
+                    y :: ys ->
+                        (time y) - (time x)
 
 
-withinBounds : Int -> Int -> MetaModel -> MetaModel
-withinBounds x y metaModel =
+
+-- case hist of
+--     [] ->
+--         0
+--     x :: _ ->
+--         case Tuple.second x of
+--             Tick dt ->
+--                 dt
+--             _ ->
+--                 0
+-- Update current position based on velocity
+
+
+updatePos : Float -> MetaModel -> MetaModel
+updatePos dt metaModel =
+    let
+        model =
+            metaModel.model
+
+        perSecond x =
+            let
+                delta =
+                    if metaModel.rewinding then
+                        dt * -1
+                    else
+                        dt
+            in
+                toFloat x * delta |> round
+
+        newX =
+            model.pos.x + perSecond model.vel.x
+
+        newY =
+            model.pos.y + perSecond model.vel.y
+    in
+        metaModel |> withinBounds newX newY 5
+
+
+
+-- Restrict position to within the edges of the window
+
+
+withinBounds : Int -> Int -> Int -> MetaModel -> MetaModel
+withinBounds x y padding metaModel =
     let
         model =
             metaModel.model
 
         collisionRadius =
-            (model.size // 2) + 5
+            (model.size // 2) + padding
 
         bound end x =
             clamp (collisionRadius) (end - collisionRadius) x
@@ -246,23 +308,12 @@ withinBounds x y metaModel =
         { metaModel | model = newModel }
 
 
-updatePos : Float -> MetaModel -> MetaModel
-updatePos dt metaModel =
-    let
-        model =
-            metaModel.model
 
-        perSecond x =
-            toFloat x * dt |> round
-    in
-        metaModel
-            |> withinBounds
-                (model.pos.x + perSecond model.vel.x)
-                (model.pos.y + perSecond model.vel.y)
+-- Set next velocity based on keyboard input
 
 
-updateMotion : KeyEvent -> MetaModel -> MetaModel
-updateMotion keyEvent metaModel =
+withMotionInput : KeyEvent -> MetaModel -> MetaModel
+withMotionInput keyEvent metaModel =
     let
         ( speed, keycode ) =
             case keyEvent of
@@ -304,12 +355,16 @@ updateMotion keyEvent metaModel =
             metaModel
 
 
+
+-- Clean up the history from entries that are too old
+
+
 historyGC : MetaModel -> MetaModel
 historyGC metaModel =
     let
         notOld : Model -> Bool
         notOld x =
-            metaModel.model.time - x.time < metaModel.recordLength * second
+            metaModel.model.time - x.time < metaModel.recordedTime * second
 
         gc list =
             List.filter (notOld << Tuple.first) list
@@ -390,7 +445,7 @@ subscriptions metaModel =
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , W.resizes WindowSize
-            , every (second * metaModel.recordLength) Purge
+            , every (second * metaModel.recordedTime) Purge
             ]
                 ++ tickIfMoving
 
