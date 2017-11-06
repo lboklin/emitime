@@ -142,30 +142,6 @@ update msg metaModel =
         ( processedMetaModel, Cmd.none )
 
 
-withTime : Time -> MetaModel -> MetaModel
-withTime dt metaModel =
-    let
-        msg =
-            (Tick dt)
-
-        addTime dt0 model =
-            { model | time = model.time + dt0 }
-
-        delta =
-            if metaModel.rewinding then
-                timeStepBack metaModel.history
-            else
-                dt
-
-        withTimeDirection mMdl =
-            if mMdl.rewinding then
-                mMdl |> popHist
-            else
-                { mMdl | model = mMdl.model |> addTime delta } |> pushHist msg
-    in
-        metaModel |> withTimeDirection |> updatePos delta
-
-
 withKeyInput : KeyEvent -> MetaModel -> MetaModel
 withKeyInput keyEvent metaModel =
     let
@@ -186,15 +162,39 @@ withKeyInput keyEvent metaModel =
                     (metaModel |> pushHist msg |> updateMotion keyEvent)
 
 
+withTime : Time -> MetaModel -> MetaModel
+withTime dt metaModel =
+    let
+        msg =
+            (Tick dt)
+
+        addTime dt0 model =
+            { model | time = model.time + dt0 }
+
+        delta =
+            if metaModel.rewinding then
+                timeDiffBack metaModel.history
+            else
+                dt
+
+        withTimeDirection mMdl =
+            if mMdl.rewinding then
+                mMdl |> stepBack
+            else
+                { mMdl | model = mMdl.model |> addTime delta } |> pushHist msg
+    in
+        metaModel |> withTimeDirection |> updatePos delta
+
+
 pushHist : Msg -> MetaModel -> MetaModel
 pushHist msg metaModel =
     { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
 
 
-popHist : MetaModel -> MetaModel
-popHist metaModel =
+stepBack : MetaModel -> MetaModel
+stepBack metaModel =
     let
-        ( head, tail ) =
+        ( previousModel, previousHistory ) =
             case metaModel.history of
                 [] ->
                     ( (metaModel.model), [] )
@@ -203,41 +203,47 @@ popHist metaModel =
                     ( Tuple.first x, xs )
     in
         { metaModel
-            | model = head
-            , history = tail
+            | model = previousModel
+            , history = previousHistory
         }
 
 
-timeStepBack : List ( Model, Msg ) -> Time
-timeStepBack hist =
+timeDiffBack : List ( Model, Msg ) -> Time
+timeDiffBack hist =
     case hist of
         [] ->
             0
 
-        x :: xs ->
-            let
-                time a =
-                    (Tuple.first a).time
-            in
-                case xs of
-                    [] ->
-                        time x
+        x :: _ ->
+            case Tuple.second x of
+                Tick dt ->
+                    dt
 
-                    y :: ys ->
-                        (time y) - (time x)
+                _ ->
+                    0
 
 
-historyGC : MetaModel -> MetaModel
-historyGC metaModel =
+withinBounds : Int -> Int -> MetaModel -> MetaModel
+withinBounds x y metaModel =
     let
-        notOld : Model -> Bool
-        notOld x =
-            metaModel.model.time - x.time < metaModel.recordLength * second
+        model =
+            metaModel.model
 
-        gc list =
-            List.filter (notOld << Tuple.first) list
+        collisionRadius =
+            (model.size // 2) + 5
+
+        bound end x =
+            clamp (collisionRadius) (end - collisionRadius) x
+
+        newModel =
+            { model
+                | pos =
+                    Position
+                        (bound metaModel.windowSize.width x)
+                        (bound metaModel.windowSize.height y)
+            }
     in
-        { metaModel | history = gc metaModel.history }
+        { metaModel | model = newModel }
 
 
 updatePos : Float -> MetaModel -> MetaModel
@@ -248,27 +254,11 @@ updatePos dt metaModel =
 
         perSecond x =
             toFloat x * dt |> round
-
-        collisionRadius =
-            (model.size // 2) + 5
-
-        bound end x =
-            clamp (collisionRadius) (end - collisionRadius) x
-
-        withinBounds x y =
-            Position
-                (bound metaModel.windowSize.width x)
-                (bound metaModel.windowSize.height y)
-
-        boundPos =
-            withinBounds
-                (model.pos.x + (perSecond model.vel.x))
-                (model.pos.y + (perSecond model.vel.y))
-
-        newModel =
-            { model | pos = boundPos }
     in
-        { metaModel | model = newModel }
+        metaModel
+            |> withinBounds
+                (model.pos.x + perSecond model.vel.x)
+                (model.pos.y + perSecond model.vel.y)
 
 
 updateMotion : KeyEvent -> MetaModel -> MetaModel
@@ -312,6 +302,19 @@ updateMotion keyEvent metaModel =
             withModelVel speed 0
         else
             metaModel
+
+
+historyGC : MetaModel -> MetaModel
+historyGC metaModel =
+    let
+        notOld : Model -> Bool
+        notOld x =
+            metaModel.model.time - x.time < metaModel.recordLength * second
+
+        gc list =
+            List.filter (notOld << Tuple.first) list
+    in
+        { metaModel | history = gc metaModel.history }
 
 
 
