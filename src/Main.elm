@@ -29,7 +29,7 @@ initMetaModel =
     { model = initModel
     , history = []
     , timeFlow = Normal
-    , recordedTime = 10
+    , recordedTime = 10 * second
     , windowSize = { width = 400, height = 400 }
     }
 
@@ -181,7 +181,14 @@ withKeyInput keyEvent metaModel =
                 if isAction keyBindings.rewind key then
                     metaModel |> withTimeFlow Paused
                 else
-                    metaModel |> modelToHistory msg |> withMotionInput keyEvent
+                    let
+                        pauseIfNotMoving mMdl =
+                            if mMdl.model.vel /= Vec2 0 0 then
+                                mMdl |> withTimeFlow Normal
+                            else
+                                mMdl |> withTimeFlow Paused
+                    in
+                        metaModel |> modelToHistory msg |> withMotionInput keyEvent |> pauseIfNotMoving
 
 
 
@@ -213,24 +220,6 @@ withTime dt metaModel =
 
 
 
--- Push current model onto the history stack
-
-
-modelToHistory : Msg -> MetaModel -> MetaModel
-modelToHistory msg metaModel =
-    { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
-
-
-
--- Setter for the flow of time
-
-
-withTimeFlow : TimeFlow -> MetaModel -> MetaModel
-withTimeFlow tf metaModel =
-    { metaModel | timeFlow = tf }
-
-
-
 -- Replace current model with the previous on in history and pop history
 
 
@@ -249,6 +238,24 @@ stepBack metaModel =
             | model = previousModel
             , history = previousHistory
         }
+
+
+
+-- Push current model onto the history stack
+
+
+modelToHistory : Msg -> MetaModel -> MetaModel
+modelToHistory msg metaModel =
+    { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+
+
+
+-- Setter for the flow of time
+
+
+withTimeFlow : TimeFlow -> MetaModel -> MetaModel
+withTimeFlow tf metaModel =
+    { metaModel | timeFlow = tf }
 
 
 
@@ -461,20 +468,16 @@ subscriptions : MetaModel -> Sub Msg
 subscriptions metaModel =
     let
         tickIfEventful =
-            let
-                isMoving =
-                    metaModel.model.vel /= Vec2 0 0
-            in
-                if isMoving || metaModel.timeFlow /= Paused then
-                    [ AnimationFrame.diffs Tick ]
-                else
-                    []
+            if metaModel.timeFlow /= Paused then
+                [ AnimationFrame.diffs Tick ]
+            else
+                []
     in
         Sub.batch <|
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , W.resizes WindowSize
-            , every (second * metaModel.recordedTime) Purge
+            , every metaModel.recordedTime Purge
             ]
                 ++ tickIfEventful
 
