@@ -6,6 +6,7 @@ import AnimationFrame
 import Char exposing (toCode)
 import Window as W exposing (Size)
 import Task
+import Time exposing (..)
 import Keyboard exposing (KeyCode, ups, downs)
 import Svg
 import Svg.Attributes as SvgA
@@ -19,6 +20,8 @@ type alias Model =
     , size : Int
     , vel : Vec2
     , history : List Record
+    , time : Time
+    , recordLength : Time
     , windowSize : Size
     }
 
@@ -26,7 +29,8 @@ type alias Model =
 type Msg
     = KeyMsg KeyEvent
     | WindowSize Size
-    | Tick Float
+    | Tick Time
+    | Purge Time
 
 
 type KeyEvent
@@ -38,6 +42,7 @@ type alias Record =
     { pos : Position
     , vel : Vec2
     , msg : Msg
+    , time : Time
     }
 
 
@@ -58,6 +63,7 @@ type alias KeyBindings =
     , moveDown : List Int
     , moveLeft : List Int
     , moveRight : List Int
+    , rewind : List Int
     }
 
 
@@ -83,6 +89,10 @@ keyBindings =
           -- Arrow right
         , 39
         ]
+    , rewind =
+        [ -- Spacebar
+          32
+        ]
     }
 
 
@@ -92,6 +102,8 @@ initModel =
     , size = 50
     , vel = { x = 0, y = 0 }
     , history = []
+    , time = 0
+    , recordLength = 5
     , windowSize = { width = 400, height = 400 }
     }
 
@@ -104,16 +116,74 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         KeyMsg keyEvent ->
-            (model |> recHist msg |> updateMotion keyEvent |> updatePos 1)
-                ! []
+            let
+                ( rw, isActivate ) =
+                    isRewind keyEvent
+            in
+                if rw then
+                    if isActivate then
+                        rewind model
+                            ! []
+                    else
+                        model ! []
+                else
+                    (model |> recHist msg |> updateMotion keyEvent)
+                        ! []
 
         WindowSize { width, height } ->
             { model | windowSize = Size width height }
                 ! []
 
         Tick dt ->
-            (model |> recHist msg |> updatePos dt)
+            ({ model | time = model.time + dt } |> recHist msg |> updatePos dt)
                 ! []
+
+        Purge _ ->
+            (model |> historyGC)
+                ! []
+
+
+historyGC : Model -> Model
+historyGC model =
+    let
+        notOld x =
+            model.time - x.time < model.recordLength * second
+    in
+        { model | history = List.filter notOld model.history }
+
+
+rewind : Model -> Model
+rewind model =
+    let
+        ( hist, hists ) =
+            case model.history of
+                [] ->
+                    ( toRecord (Tick 0) model, [] )
+
+                x :: xs ->
+                    ( x, xs )
+    in
+        { model
+            | pos = hist.pos
+            , vel = hist.vel
+            , time = hist.time
+            , history = hists
+        }
+
+
+isAction : List Int -> Int -> Bool
+isAction action key =
+    List.any ((==) key) action
+
+
+isRewind : KeyEvent -> ( Bool, Bool )
+isRewind keyEvent =
+    case keyEvent of
+        KeyDown key ->
+            ( isAction keyBindings.rewind key, True )
+
+        KeyUp key ->
+            ( isAction keyBindings.rewind key, False )
 
 
 recHist : Msg -> Model -> Model
@@ -126,6 +196,7 @@ toRecord msg model =
     { pos = model.pos
     , vel = model.vel
     , msg = msg
+    , time = model.time
     }
 
 
@@ -133,7 +204,7 @@ updatePos : Float -> Model -> Model
 updatePos dt model =
     let
         perSec x =
-            (x |> toFloat) * dt |> round
+            toFloat x * dt |> round
 
         dvx =
             perSec model.vel.x
@@ -141,11 +212,14 @@ updatePos dt model =
         dvy =
             perSec model.vel.y
 
-        padded begin end padding x =
-            clamp (begin + padding) (end - padding) x
+        collisionRadius =
+            (model.size // 2) + 5
+
+        padded begin end x =
+            clamp (begin + collisionRadius) (end - collisionRadius) x
 
         bound range x =
-            padded 0 range ((model.size // 2) + 10) x
+            padded 0 range x
 
         bounded x y =
             Position
@@ -273,6 +347,7 @@ subscriptions model =
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , W.resizes WindowSize
+            , every (second * model.recordLength) Purge
             ]
                 ++ tickIfMoving
 
