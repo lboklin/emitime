@@ -15,14 +15,39 @@ import Svg.Attributes as SvgA
 -- MODEL
 
 
+type alias MetaModel =
+    { model : Model
+    , history : List ( Model, Msg )
+    , rewinding : Bool
+    , recordLength : Time
+    , windowSize : Size
+    }
+
+
+initMetaModel : MetaModel
+initMetaModel =
+    { model = initModel
+    , history = []
+    , rewinding = False
+    , recordLength = 5
+    , windowSize = { width = 400, height = 400 }
+    }
+
+
 type alias Model =
     { pos : Position
     , size : Int
     , vel : Vec2
-    , history : List Record
     , time : Time
-    , recordLength : Time
-    , windowSize : Size
+    }
+
+
+initModel : Model
+initModel =
+    { pos = Position 0 0
+    , size = 50
+    , vel = { x = 0, y = 0 }
+    , time = 0
     }
 
 
@@ -36,14 +61,6 @@ type Msg
 type KeyEvent
     = KeyDown KeyCode
     | KeyUp KeyCode
-
-
-type alias Record =
-    { pos : Position
-    , vel : Vec2
-    , msg : Msg
-    , time : Time
-    }
 
 
 type alias Position =
@@ -96,144 +113,166 @@ keyBindings =
     }
 
 
-initModel : Model
-initModel =
-    { pos = Position 0 0
-    , size = 50
-    , vel = { x = 0, y = 0 }
-    , history = []
-    , time = 0
-    , recordLength = 5
-    , windowSize = { width = 400, height = 400 }
-    }
+isAction : List Int -> Int -> Bool
+isAction action key =
+    List.any ((==) key) action
 
 
 
 -- UPDATE
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
-    case msg of
-        KeyMsg keyEvent ->
-            let
-                ( rw, isActivate ) =
-                    isRewind keyEvent
-            in
-                if rw then
-                    if isActivate then
-                        rewind model
-                            ! []
-                    else
-                        model ! []
-                else
-                    (model |> recHist msg |> updateMotion keyEvent)
-                        ! []
-
-        WindowSize { width, height } ->
-            { model | windowSize = Size width height }
-                ! []
-
-        Tick dt ->
-            ({ model | time = model.time + dt } |> recHist msg |> updatePos dt)
-                ! []
-
-        Purge _ ->
-            (model |> historyGC)
-                ! []
-
-
-historyGC : Model -> Model
-historyGC model =
+update : Msg -> MetaModel -> ( MetaModel, Cmd Msg )
+update msg metaModel =
     let
-        notOld x =
-            model.time - x.time < model.recordLength * second
+        processedMetaModel =
+            case msg of
+                KeyMsg keyEvent ->
+                    metaModel |> withKeyInput keyEvent
+
+                WindowSize { width, height } ->
+                    { metaModel | windowSize = Size width height }
+
+                Tick dt ->
+                    metaModel |> withTime dt
+
+                Purge _ ->
+                    metaModel |> historyGC
     in
-        { model | history = List.filter notOld model.history }
+        ( processedMetaModel, Cmd.none )
 
 
-rewind : Model -> Model
-rewind model =
+withTime : Time -> MetaModel -> MetaModel
+withTime dt metaModel =
     let
-        ( hist, hists ) =
-            case model.history of
+        msg =
+            (Tick dt)
+
+        addTime dt0 model =
+            { model | time = model.time + dt0 }
+
+        delta =
+            if metaModel.rewinding then
+                timeStepBack metaModel.history
+            else
+                dt
+
+        withTimeDirection mMdl =
+            if mMdl.rewinding then
+                mMdl |> popHist
+            else
+                { mMdl | model = mMdl.model |> addTime delta } |> pushHist msg
+    in
+        metaModel |> withTimeDirection |> updatePos delta
+
+
+withKeyInput : KeyEvent -> MetaModel -> MetaModel
+withKeyInput keyEvent metaModel =
+    let
+        msg =
+            (KeyMsg keyEvent)
+    in
+        case keyEvent of
+            KeyDown key ->
+                if isAction keyBindings.rewind key then
+                    { metaModel | rewinding = True }
+                else
+                    (metaModel |> pushHist msg |> updateMotion keyEvent)
+
+            KeyUp key ->
+                if isAction keyBindings.rewind key then
+                    { metaModel | rewinding = False }
+                else
+                    (metaModel |> pushHist msg |> updateMotion keyEvent)
+
+
+pushHist : Msg -> MetaModel -> MetaModel
+pushHist msg metaModel =
+    { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+
+
+popHist : MetaModel -> MetaModel
+popHist metaModel =
+    let
+        ( head, tail ) =
+            case metaModel.history of
                 [] ->
-                    ( toRecord (Tick 0) model, [] )
+                    ( (metaModel.model), [] )
 
                 x :: xs ->
-                    ( x, xs )
+                    ( Tuple.first x, xs )
     in
-        { model
-            | pos = hist.pos
-            , vel = hist.vel
-            , time = hist.time
-            , history = hists
+        { metaModel
+            | model = head
+            , history = tail
         }
 
 
-isAction : List Int -> Int -> Bool
-isAction action key =
-    List.any ((==) key) action
+timeStepBack : List ( Model, Msg ) -> Time
+timeStepBack hist =
+    case hist of
+        [] ->
+            0
+
+        x :: xs ->
+            let
+                time a =
+                    (Tuple.first a).time
+            in
+                case xs of
+                    [] ->
+                        time x
+
+                    y :: ys ->
+                        (time y) - (time x)
 
 
-isRewind : KeyEvent -> ( Bool, Bool )
-isRewind keyEvent =
-    case keyEvent of
-        KeyDown key ->
-            ( isAction keyBindings.rewind key, True )
-
-        KeyUp key ->
-            ( isAction keyBindings.rewind key, False )
-
-
-recHist : Msg -> Model -> Model
-recHist msg model =
-    { model | history = (toRecord msg model) :: model.history }
-
-
-toRecord : Msg -> Model -> Record
-toRecord msg model =
-    { pos = model.pos
-    , vel = model.vel
-    , msg = msg
-    , time = model.time
-    }
-
-
-updatePos : Float -> Model -> Model
-updatePos dt model =
+historyGC : MetaModel -> MetaModel
+historyGC metaModel =
     let
-        perSec x =
+        notOld : Model -> Bool
+        notOld x =
+            metaModel.model.time - x.time < metaModel.recordLength * second
+
+        gc list =
+            List.filter (notOld << Tuple.first) list
+    in
+        { metaModel | history = gc metaModel.history }
+
+
+updatePos : Float -> MetaModel -> MetaModel
+updatePos dt metaModel =
+    let
+        model =
+            metaModel.model
+
+        perSecond x =
             toFloat x * dt |> round
-
-        dvx =
-            perSec model.vel.x
-
-        dvy =
-            perSec model.vel.y
 
         collisionRadius =
             (model.size // 2) + 5
 
-        padded begin end x =
-            clamp (begin + collisionRadius) (end - collisionRadius) x
+        bound end x =
+            clamp (collisionRadius) (end - collisionRadius) x
 
-        bound range x =
-            padded 0 range x
-
-        bounded x y =
+        withinBounds x y =
             Position
-                (bound model.windowSize.width x)
-                (bound model.windowSize.height y)
+                (bound metaModel.windowSize.width x)
+                (bound metaModel.windowSize.height y)
+
+        boundPos =
+            withinBounds
+                (model.pos.x + (perSecond model.vel.x))
+                (model.pos.y + (perSecond model.vel.y))
+
+        newModel =
+            { model | pos = boundPos }
     in
-        { model
-            | pos =
-                bounded (model.pos.x + dvx) (model.pos.y + dvy)
-        }
+        { metaModel | model = newModel }
 
 
-updateMotion : KeyEvent -> Model -> Model
-updateMotion keyEvent model =
+updateMotion : KeyEvent -> MetaModel -> MetaModel
+updateMotion keyEvent metaModel =
     let
         ( speed, keycode ) =
             case keyEvent of
@@ -243,35 +282,36 @@ updateMotion keyEvent model =
                 KeyUp key ->
                     ( -1, key )
 
-        isAction x =
-            List.any ((==) keycode) x
+        addIfNotEqual x y =
+            if x /= y then
+                x + y
+            else
+                x
 
-        addVel x y =
-            { model
-                | vel =
-                    { x =
-                        if model.vel.x /= x then
-                            model.vel.x + x
-                        else
-                            model.vel.x
-                    , y =
-                        if model.vel.y /= y then
-                            model.vel.y + y
-                        else
-                            model.vel.y
-                    }
+        model =
+            metaModel.model
+
+        newVel x y =
+            { x = addIfNotEqual model.vel.x x
+            , y = addIfNotEqual model.vel.y y
             }
+
+        withModelVel x y =
+            { metaModel | model = { model | vel = newVel x y } }
+
+        is action =
+            isAction action keycode
     in
-        if isAction keyBindings.moveUp then
-            addVel 0 -speed
-        else if isAction keyBindings.moveDown then
-            addVel 0 speed
-        else if isAction keyBindings.moveLeft then
-            addVel -speed 0
-        else if isAction keyBindings.moveRight then
-            addVel speed 0
+        if is keyBindings.moveUp then
+            withModelVel 0 -speed
+        else if is keyBindings.moveDown then
+            withModelVel 0 speed
+        else if is keyBindings.moveLeft then
+            withModelVel -speed 0
+        else if is keyBindings.moveRight then
+            withModelVel speed 0
         else
-            model
+            metaModel
 
 
 
@@ -288,21 +328,21 @@ px x =
     toString x ++ "px"
 
 
-view : Model -> Html Msg
-view model =
+view : MetaModel -> Html Msg
+view metaModel =
     let
         pos =
-            Position model.pos.x model.pos.y
+            Position metaModel.model.pos.x metaModel.model.pos.y
     in
         Html.div
             [ Html.Attributes.style <|
-                [ "width" => ((model.windowSize.width |> toString) ++ "px")
-                , "height" => ((model.windowSize.height |> toString) ++ "px")
+                [ "width" => ((metaModel.windowSize.width |> toString) ++ "px")
+                , "height" => ((metaModel.windowSize.height |> toString) ++ "px")
                 , "display" => "block"
                 , "background-color" => "#2d2d2d"
                 ]
             ]
-            [ circle (model.size // 2) pos ]
+            [ circle (metaModel.model.size // 2) pos ]
 
 
 circle : Int -> Position -> Html msg
@@ -334,11 +374,11 @@ circle r pos =
 -- SUBSCRIPTIONS
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
+subscriptions : MetaModel -> Sub Msg
+subscriptions metaModel =
     let
         tickIfMoving =
-            if model.vel /= Vec2 0 0 then
+            if metaModel.model.vel /= Vec2 0 0 then
                 [ AnimationFrame.diffs Tick ]
             else
                 []
@@ -347,7 +387,7 @@ subscriptions model =
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , W.resizes WindowSize
-            , every (second * model.recordLength) Purge
+            , every (second * metaModel.recordLength) Purge
             ]
                 ++ tickIfMoving
 
@@ -356,10 +396,10 @@ subscriptions model =
 -- MAIN
 
 
-main : Program Never Model Msg
+main : Program Never MetaModel Msg
 main =
     Html.program
-        { init = ( initModel, Task.perform WindowSize W.size )
+        { init = ( initMetaModel, Task.perform WindowSize W.size )
         , view = view
         , subscriptions = subscriptions
         , update = update
