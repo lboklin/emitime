@@ -29,7 +29,7 @@ initMetaModel =
     { model = initModel
     , history = []
     , timeFlow = Normal
-    , recordedTime = 10 * second
+    , recordedTime = 3 * second
     , windowSize = { width = 400, height = 400 }
     }
 
@@ -181,14 +181,43 @@ withKeyInput keyEvent metaModel =
                 if isAction keyBindings.rewind key then
                     metaModel |> withTimeFlow Paused
                 else
-                    let
-                        pauseIfNotMoving mMdl =
-                            if mMdl.model.vel /= Vec2 0 0 then
-                                mMdl |> withTimeFlow Normal
-                            else
-                                mMdl |> withTimeFlow Paused
-                    in
-                        metaModel |> modelToHistory msg |> withMotionInput keyEvent |> pauseIfNotMoving
+                    metaModel |> modelToHistory msg |> withMotionInput keyEvent |> pauseIfNotMoving
+
+
+
+-- When velocity is 0, pause time
+
+
+pauseIfNotMoving : MetaModel -> MetaModel
+pauseIfNotMoving mMdl =
+    if mMdl.model.vel /= Vec2 0 0 then
+        mMdl |> withTimeFlow Normal
+    else
+        mMdl |> withTimeFlow Paused
+
+
+
+-- When position hasn't changed since last iteration, pause time
+
+
+pauseIfNotMoving_ : MetaModel -> MetaModel
+pauseIfNotMoving_ mMdl =
+    let
+        currentPos =
+            mMdl.model.pos
+
+        lastPos =
+            case mMdl.history of
+                [] ->
+                    mMdl.model.pos
+
+                x :: _ ->
+                    (Tuple.first x).pos
+    in
+        if currentPos /= lastPos then
+            mMdl |> withTimeFlow Normal
+        else
+            mMdl |> withTimeFlow Paused
 
 
 
@@ -396,7 +425,7 @@ historyGC metaModel =
     let
         notOld : Model -> Bool
         notOld x =
-            metaModel.model.time - x.time < metaModel.recordedTime * second
+            metaModel.model.time - x.time < metaModel.recordedTime
 
         gc list =
             List.filter (notOld << Tuple.first) list
