@@ -4,7 +4,7 @@ import Html exposing (Html)
 import Html.Attributes
 import AnimationFrame
 import Char exposing (toCode)
-import Window as W exposing (Size)
+import Window exposing (Size)
 import Task
 import Time exposing (..)
 import Keyboard exposing (KeyCode, ups, downs)
@@ -476,7 +476,7 @@ subscriptions metaModel =
         Sub.batch <|
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
-            , W.resizes WindowSize
+            , Window.resizes WindowSize
             , every metaModel.recordedTime Purge
             ]
                 ++ tickIfEventful
@@ -489,7 +489,7 @@ subscriptions metaModel =
 main : Program Never MetaModel Msg
 main =
     Html.program
-        { init = ( initMetaModel, Task.perform WindowSize W.size )
+        { init = ( initMetaModel, Task.perform WindowSize Window.size )
         , view = view
         , subscriptions = subscriptions
         , update = update
