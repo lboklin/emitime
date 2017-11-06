@@ -18,7 +18,7 @@ import Svg.Attributes as SvgA
 type alias MetaModel =
     { model : Model
     , history : List ( Model, Msg )
-    , rewinding : Bool
+    , timeFlow : TimeFlow
     , recordedTime : Time
     , windowSize : Size
     }
@@ -28,7 +28,7 @@ initMetaModel : MetaModel
 initMetaModel =
     { model = initModel
     , history = []
-    , rewinding = False
+    , timeFlow = Normal
     , recordedTime = 10
     , windowSize = { width = 400, height = 400 }
     }
@@ -61,6 +61,12 @@ type Msg
 type KeyEvent
     = KeyDown KeyCode
     | KeyUp KeyCode
+
+
+type TimeFlow
+    = Normal
+    | Paused
+    | Reversed
 
 
 type alias Position =
@@ -134,7 +140,19 @@ update msg metaModel =
                     { metaModel | windowSize = Size width height }
 
                 Tick dt ->
-                    metaModel |> withTime dt
+                    let
+                        delta =
+                            case metaModel.timeFlow of
+                                Normal ->
+                                    dt
+
+                                Paused ->
+                                    0
+
+                                Reversed ->
+                                    dt * -1
+                    in
+                        metaModel |> withTime delta
 
                 Purge _ ->
                     metaModel |> historyGC
@@ -155,15 +173,15 @@ withKeyInput keyEvent metaModel =
         case keyEvent of
             KeyDown key ->
                 if isAction keyBindings.rewind key then
-                    { metaModel | rewinding = True }
+                    metaModel |> withTimeFlow Reversed
                 else
-                    (metaModel |> modelToHistory msg |> withMotionInput keyEvent)
+                    metaModel |> withTimeFlow Normal |> modelToHistory msg |> withMotionInput keyEvent
 
             KeyUp key ->
                 if isAction keyBindings.rewind key then
-                    { metaModel | rewinding = False }
+                    metaModel |> withTimeFlow Paused
                 else
-                    (metaModel |> modelToHistory msg |> withMotionInput keyEvent)
+                    metaModel |> modelToHistory msg |> withMotionInput keyEvent
 
 
 
@@ -173,30 +191,35 @@ withKeyInput keyEvent metaModel =
 withTime : Time -> MetaModel -> MetaModel
 withTime dt metaModel =
     let
-        msg =
-            (Tick dt)
-
-        addTime dt0 model =
-            { model | time = model.time + dt0 }
-
-        delta =
-            if metaModel.rewinding then
-                timeDiffBack metaModel.history
-            else
-                dt
+        withAddedTime dt0 mMdl =
+            let
+                timeAdd dt0 model =
+                    { model | time = model.time + dt0 }
+            in
+                { mMdl | model = mMdl.model |> timeAdd dt0 }
 
         withTimeDirection mMdl =
-            if mMdl.rewinding then
-                mMdl |> stepBack
-            else
-                { mMdl | model = mMdl.model |> addTime delta } |> modelToHistory msg
+            case mMdl.timeFlow of
+                Normal ->
+                    mMdl |> withAddedTime dt |> modelToHistory (Tick dt)
+
+                Paused ->
+                    mMdl
+
+                Reversed ->
+                    mMdl |> stepBack
     in
-        metaModel |> withTimeDirection |> updatePos delta
+        metaModel |> withTimeDirection |> updatePos dt
 
 
 modelToHistory : Msg -> MetaModel -> MetaModel
 modelToHistory msg metaModel =
     { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+
+
+withTimeFlow : TimeFlow -> MetaModel -> MetaModel
+withTimeFlow tf metaModel =
+    { metaModel | timeFlow = tf }
 
 
 
@@ -226,33 +249,22 @@ stepBack metaModel =
 
 timeDiffBack : List ( Model, Msg ) -> Time
 timeDiffBack hist =
-    case hist of
-        [] ->
-            0
+    let
+        time a =
+            (Tuple.first a).time
+    in
+        case hist of
+            [] ->
+                0
 
-        x :: xs ->
-            let
-                time a =
-                    (Tuple.first a).time
-            in
-                case xs of
-                    [] ->
-                        time x
+            x :: [] ->
+                time x
 
-                    y :: ys ->
-                        (time y) - (time x)
+            x :: y :: _ ->
+                (time y) - (time x)
 
 
 
--- case hist of
---     [] ->
---         0
---     x :: _ ->
---         case Tuple.second x of
---             Tick dt ->
---                 dt
---             _ ->
---                 0
 -- Update current position based on velocity
 
 
@@ -265,10 +277,15 @@ updatePos dt metaModel =
         perSecond x =
             let
                 delta =
-                    if metaModel.rewinding then
-                        dt * -1
-                    else
-                        dt
+                    case metaModel.timeFlow of
+                        Normal ->
+                            dt
+
+                        Paused ->
+                            0
+
+                        Reversed ->
+                            dt * -1
             in
                 toFloat x * delta |> round
 
@@ -435,11 +452,15 @@ circle r pos =
 subscriptions : MetaModel -> Sub Msg
 subscriptions metaModel =
     let
-        tickIfMoving =
-            if metaModel.model.vel /= Vec2 0 0 then
-                [ AnimationFrame.diffs Tick ]
-            else
-                []
+        tickIfEventful =
+            let
+                isMoving =
+                    metaModel.model.vel /= Vec2 0 0
+            in
+                if isMoving || metaModel.timeFlow /= Paused then
+                    [ AnimationFrame.diffs Tick ]
+                else
+                    []
     in
         Sub.batch <|
             [ ups (\x -> KeyMsg (KeyUp x))
@@ -447,7 +468,7 @@ subscriptions metaModel =
             , W.resizes WindowSize
             , every (second * metaModel.recordedTime) Purge
             ]
-                ++ tickIfMoving
+                ++ tickIfEventful
 
 
 
