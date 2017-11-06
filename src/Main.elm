@@ -150,7 +150,7 @@ update msg metaModel =
                                     0
 
                                 Reversed ->
-                                    timeDiffBack metaModel.history
+                                    -dt
                     in
                         metaModel |> withTime delta
 
@@ -263,8 +263,9 @@ stepBack metaModel =
                 x :: xs ->
                     ( Tuple.first x, xs )
     in
+        -- I'm not sure how to fix velocity getting stuck other than to reset it here
         { metaModel
-            | model = previousModel
+            | model = { previousModel | vel = { x = 0, y = 0 } }
             , history = previousHistory
         }
 
@@ -275,7 +276,7 @@ stepBack metaModel =
 
 modelToHistory : Msg -> MetaModel -> MetaModel
 modelToHistory msg metaModel =
-    { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+    { metaModel | history = ( metaModel.model, msg ) :: (validHistory metaModel) }
 
 
 
@@ -460,7 +461,7 @@ view metaModel =
             ]
         ]
         ([ circle (metaModel.model.size // 2) metaModel.model.pos ]
-            ++ (List.map (\x -> (Tuple.first x).pos |> circle (metaModel.model.size // 5)) metaModel.history)
+            ++ (List.map (\x -> (Tuple.first x).pos |> circle (metaModel.model.size // 5)) (validHistory metaModel))
         )
 
 
@@ -506,7 +507,7 @@ subscriptions metaModel =
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , Window.resizes WindowSize
-            , every second Purge
+              -- , every (second / 5) Purge
             ]
                 ++ tickIfEventful
 
