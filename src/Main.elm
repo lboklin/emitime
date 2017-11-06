@@ -150,7 +150,7 @@ update msg metaModel =
                                     0
 
                                 Reversed ->
-                                    dt * -1
+                                    timeDiffBack metaModel.history
                     in
                         metaModel |> withTime delta
 
@@ -422,15 +422,17 @@ withMotionInput keyEvent metaModel =
 
 historyGC : MetaModel -> MetaModel
 historyGC metaModel =
+    { metaModel | history = validHistory metaModel }
+
+
+validHistory : MetaModel -> List ( Model, Msg )
+validHistory metaModel =
     let
         notOld : Model -> Bool
         notOld x =
             metaModel.model.time - x.time < metaModel.recordedTime
-
-        gc list =
-            List.filter (notOld << Tuple.first) list
     in
-        { metaModel | history = gc metaModel.history }
+        List.filter (notOld << Tuple.first) metaModel.history
 
 
 
@@ -449,19 +451,17 @@ px x =
 
 view : MetaModel -> Html Msg
 view metaModel =
-    let
-        pos =
-            Position metaModel.model.pos.x metaModel.model.pos.y
-    in
-        Html.div
-            [ Html.Attributes.style <|
-                [ "width" => ((metaModel.windowSize.width |> toString) ++ "px")
-                , "height" => ((metaModel.windowSize.height |> toString) ++ "px")
-                , "display" => "block"
-                , "background-color" => "#2d2d2d"
-                ]
+    Html.div
+        [ Html.Attributes.style <|
+            [ "width" => ((metaModel.windowSize.width |> toString) ++ "px")
+            , "height" => ((metaModel.windowSize.height |> toString) ++ "px")
+            , "display" => "block"
+            , "background-color" => "#2d2d2d"
             ]
-            [ circle (metaModel.model.size // 2) pos ]
+        ]
+        ([ circle (metaModel.model.size // 2) metaModel.model.pos ]
+            ++ (List.map (\x -> (Tuple.first x).pos |> circle (metaModel.model.size // 5)) metaModel.history)
+        )
 
 
 circle : Int -> Position -> Html msg
@@ -506,7 +506,7 @@ subscriptions metaModel =
             [ ups (\x -> KeyMsg (KeyUp x))
             , downs (\x -> KeyMsg (KeyDown x))
             , Window.resizes WindowSize
-            , every metaModel.recordedTime Purge
+            , every second Purge
             ]
                 ++ tickIfEventful
 
