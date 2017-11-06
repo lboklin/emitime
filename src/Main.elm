@@ -29,7 +29,7 @@ initMetaModel =
     { model = initModel
     , history = []
     , timeFlow = Normal
-    , recordedTime = 3 * second
+    , recordedTime = 10 * second
     , windowSize = { width = 400, height = 400 }
     }
 
@@ -44,7 +44,7 @@ type alias Model =
 
 initModel : Model
 initModel =
-    { pos = Position 0 0
+    { pos = Position 200 200
     , size = 50
     , vel = { x = 0, y = 0 }
     , time = 0
@@ -185,42 +185,6 @@ withKeyInput keyEvent metaModel =
 
 
 
--- When velocity is 0, pause time
-
-
-pauseIfNotMoving : MetaModel -> MetaModel
-pauseIfNotMoving mMdl =
-    if mMdl.model.vel /= Vec2 0 0 then
-        mMdl |> withTimeFlow Normal
-    else
-        mMdl |> withTimeFlow Paused
-
-
-
--- When position hasn't changed since last iteration, pause time
-
-
-pauseIfNotMoving_ : MetaModel -> MetaModel
-pauseIfNotMoving_ mMdl =
-    let
-        currentPos =
-            mMdl.model.pos
-
-        lastPos =
-            case mMdl.history of
-                [] ->
-                    mMdl.model.pos
-
-                x :: _ ->
-                    (Tuple.first x).pos
-    in
-        if currentPos /= lastPos then
-            mMdl |> withTimeFlow Normal
-        else
-            mMdl |> withTimeFlow Paused
-
-
-
 -- Update meta model in regards to time
 
 
@@ -255,19 +219,52 @@ withTime dt metaModel =
 stepBack : MetaModel -> MetaModel
 stepBack metaModel =
     let
-        ( previousModel, previousHistory ) =
-            case metaModel.history of
-                [] ->
-                    ( (metaModel.model), [] )
-
-                x :: xs ->
-                    ( Tuple.first x, xs )
+        previousModel =
+            List.head metaModel.history
+                |> Maybe.withDefault ( metaModel.model, Tick 0 )
+                |> Tuple.first
     in
         -- I'm not sure how to fix velocity getting stuck other than to reset it here
         { metaModel
             | model = { previousModel | vel = { x = 0, y = 0 } }
-            , history = previousHistory
+            , history = Maybe.withDefault [] (List.tail metaModel.history)
         }
+
+
+
+-- When velocity is 0, pause time
+
+
+pauseIfNotMoving : MetaModel -> MetaModel
+pauseIfNotMoving mMdl =
+    if mMdl.model.vel /= Vec2 0 0 then
+        mMdl |> withTimeFlow Normal
+    else
+        mMdl |> withTimeFlow Paused
+
+
+
+-- When position hasn't changed since last iteration, pause time
+
+
+pauseIfNotMoving_ : MetaModel -> MetaModel
+pauseIfNotMoving_ mMdl =
+    let
+        currentPos =
+            mMdl.model.pos
+
+        lastPos =
+            case mMdl.history of
+                [] ->
+                    mMdl.model.pos
+
+                x :: _ ->
+                    (Tuple.first x).pos
+    in
+        if currentPos /= lastPos then
+            mMdl |> withTimeFlow Normal
+        else
+            mMdl |> withTimeFlow Paused
 
 
 
@@ -460,9 +457,15 @@ view metaModel =
             , "background-color" => "#2d2d2d"
             ]
         ]
-        ([ circle (metaModel.model.size // 2) metaModel.model.pos ]
-            ++ (List.map (\x -> (Tuple.first x).pos |> circle (metaModel.model.size // 5)) (validHistory metaModel))
-        )
+        (nodes metaModel)
+
+
+nodes : MetaModel -> List (Html msg)
+nodes metaModel =
+    List.concat
+        [ [ circle (metaModel.model.size // 2) metaModel.model.pos ]
+        , circleTrail metaModel
+        ]
 
 
 circle : Int -> Position -> Html msg
@@ -488,6 +491,15 @@ circle r pos =
                 []
             ]
         ]
+
+
+circleTrail : MetaModel -> List (Html msg)
+circleTrail metaModel =
+    let
+        toCircle ( model, _ ) =
+            model.pos |> circle (model.size // 5)
+    in
+        metaModel |> validHistory |> List.map toCircle
 
 
 
