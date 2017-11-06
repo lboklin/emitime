@@ -212,9 +212,17 @@ withTime dt metaModel =
         metaModel |> withTimeDirection |> updatePos dt
 
 
+
+-- Push current model onto the history stack
+
+
 modelToHistory : Msg -> MetaModel -> MetaModel
 modelToHistory msg metaModel =
     { metaModel | history = ( metaModel.model, msg ) :: metaModel.history }
+
+
+
+-- Setter for the flow of time
 
 
 withTimeFlow : TimeFlow -> MetaModel -> MetaModel
