@@ -1,4 +1,4 @@
-module Circle exposing (..)
+module Circle exposing (Model, initModel, view, setColor, setSize)
 
 import Time exposing (..)
 import Html exposing (Html)
@@ -30,6 +30,16 @@ initModel =
     , vel = { x = 0, y = 0 }
     , time = 0
     }
+
+
+setColor : Color -> Model -> Model
+setColor color model =
+    { model | color = color }
+
+
+setSize : Int -> Model -> Model
+setSize size model =
+    { model | size = size }
 
 
 

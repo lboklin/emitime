@@ -8,7 +8,7 @@ import Window exposing (Size)
 import Task
 import Time exposing (..)
 import Keyboard exposing (KeyCode, ups, downs)
-import Circle
+import Circle exposing (..)
 import Utils exposing (..)
 import Color exposing (..)
 
@@ -17,8 +17,8 @@ import Color exposing (..)
 
 
 type alias MetaModel =
-    { model : Circle.Model
-    , history : List ( Circle.Model, Msg )
+    { model : Model
+    , history : List ( Model, Msg )
     , timeFlow : TimeFlow
     , recordedTime : Time
     , windowSize : Size
@@ -27,7 +27,7 @@ type alias MetaModel =
 
 initMetaModel : MetaModel
 initMetaModel =
-    { model = Circle.initModel
+    { model = initModel
     , history = []
     , timeFlow = Normal
     , recordedTime = 3 * second
@@ -106,7 +106,7 @@ update msg metaModel =
         processedMetaModel =
             case msg of
                 KeyMsg keyEvent ->
-                    metaModel |> withKeyInput keyEvent
+                    metaModel |> keyInput keyEvent
 
                 WindowSize { width, height } ->
                     { metaModel | windowSize = Size width height }
@@ -124,7 +124,7 @@ update msg metaModel =
                                 Reversed ->
                                     -dt
                     in
-                        metaModel |> withTime delta
+                        metaModel |> tick delta
 
                 Purge _ ->
                     metaModel |> historyGC
@@ -136,32 +136,35 @@ update msg metaModel =
 -- React to keyboard input
 
 
-withKeyInput : KeyEvent -> MetaModel -> MetaModel
-withKeyInput keyEvent metaModel =
+keyInput : KeyEvent -> MetaModel -> MetaModel
+keyInput keyEvent metaModel =
     let
         msg =
             (KeyMsg keyEvent)
+
+        updateVelocity mMdl =
+            { mMdl | model = (mMdl.model |> motionInput keyEvent) }
     in
         case keyEvent of
             KeyDown key ->
                 if isAction keyBindings.rewind key then
-                    metaModel |> withTimeFlow Reversed
+                    metaModel |> setTimeFlow Reversed
                 else
-                    metaModel |> withTimeFlow Normal |> modelToHistory msg |> withMotionInput keyEvent
+                    metaModel |> setTimeFlow Normal |> modelToHistory msg |> updateVelocity
 
             KeyUp key ->
                 if isAction keyBindings.rewind key then
-                    metaModel |> withTimeFlow Paused
+                    metaModel |> setTimeFlow Paused
                 else
-                    metaModel |> modelToHistory msg |> withMotionInput keyEvent |> pauseIfNotMoving
+                    metaModel |> modelToHistory msg |> updateVelocity |> pauseIfNotMoving
 
 
 
 -- Update meta model in regards to time
 
 
-withTime : Time -> MetaModel -> MetaModel
-withTime dt metaModel =
+tick : Time -> MetaModel -> MetaModel
+tick dt metaModel =
     let
         withAddedTime dt0 mMdl =
             let
@@ -210,9 +213,9 @@ stepBack metaModel =
 pauseIfNotMoving : MetaModel -> MetaModel
 pauseIfNotMoving mMdl =
     if mMdl.model.vel /= Vec2 0 0 then
-        mMdl |> withTimeFlow Normal
+        mMdl |> setTimeFlow Normal
     else
-        mMdl |> withTimeFlow Paused
+        mMdl |> setTimeFlow Paused
 
 
 
@@ -234,9 +237,9 @@ pauseIfNotMoving_ mMdl =
                     (Tuple.first x).pos
     in
         if currentPos /= lastPos then
-            mMdl |> withTimeFlow Normal
+            mMdl |> setTimeFlow Normal
         else
-            mMdl |> withTimeFlow Paused
+            mMdl |> setTimeFlow Paused
 
 
 
@@ -252,8 +255,8 @@ modelToHistory msg metaModel =
 -- Setter for the flow of time
 
 
-withTimeFlow : TimeFlow -> MetaModel -> MetaModel
-withTimeFlow tf metaModel =
+setTimeFlow : TimeFlow -> MetaModel -> MetaModel
+setTimeFlow tf metaModel =
     { metaModel | timeFlow = tf }
 
 
@@ -261,7 +264,7 @@ withTimeFlow tf metaModel =
 -- The negative difference between current time and the time of the previous model
 
 
-timeDiffBack : List ( Circle.Model, Msg ) -> Time
+timeDiffBack : List ( Model, Msg ) -> Time
 timeDiffBack hist =
     let
         time a =
@@ -343,8 +346,8 @@ withinBounds x y padding metaModel =
 -- Set next velocity based on keyboard input
 
 
-withMotionInput : KeyEvent -> MetaModel -> MetaModel
-withMotionInput keyEvent metaModel =
+motionInput : KeyEvent -> Model -> Model
+motionInput keyEvent model =
     let
         ( speed, keycode ) =
             case keyEvent of
@@ -360,30 +363,27 @@ withMotionInput keyEvent metaModel =
             else
                 x
 
-        model =
-            metaModel.model
-
         newVel x y =
             { x = addIfNotEqual model.vel.x x
             , y = addIfNotEqual model.vel.y y
             }
 
-        withModelVel x y =
-            { metaModel | model = { model | vel = newVel x y } }
+        setVel x y =
+            { model | vel = newVel x y }
 
         is action =
             isAction action keycode
     in
         if is keyBindings.moveUp then
-            withModelVel 0 -speed
+            setVel 0 -speed
         else if is keyBindings.moveDown then
-            withModelVel 0 speed
+            setVel 0 speed
         else if is keyBindings.moveLeft then
-            withModelVel -speed 0
+            setVel -speed 0
         else if is keyBindings.moveRight then
-            withModelVel speed 0
+            setVel speed 0
         else
-            metaModel
+            model
 
 
 
@@ -395,10 +395,10 @@ historyGC metaModel =
     { metaModel | history = validHistory metaModel }
 
 
-validHistory : MetaModel -> List ( Circle.Model, Msg )
+validHistory : MetaModel -> List ( Model, Msg )
 validHistory metaModel =
     let
-        notOld : Circle.Model -> Bool
+        notOld : Model -> Bool
         notOld x =
             metaModel.model.time - x.time < metaModel.recordedTime
     in
@@ -422,21 +422,11 @@ view metaModel =
         (nodes metaModel)
 
 
-withColor : Color -> Circle.Model -> Circle.Model
-withColor color model =
-    { model | color = color }
-
-
-withSize : Int -> Circle.Model -> Circle.Model
-withSize size model =
-    { model | size = size }
-
-
 nodes : MetaModel -> List (Html msg)
 nodes metaModel =
     List.concat
         [ circleTrail metaModel
-        , [ Circle.view (metaModel.model |> withColor green) ]
+        , [ Circle.view (metaModel.model |> setColor green) ]
         ]
 
 
@@ -444,7 +434,7 @@ circleTrail : MetaModel -> List (Html msg)
 circleTrail metaModel =
     let
         toCircle ( model, _ ) =
-            Circle.view (model |> withColor charcoal |> withSize (model.size // 2))
+            Circle.view (model |> setColor charcoal |> setSize (model.size // 2))
     in
         metaModel |> validHistory |> List.map toCircle
 
