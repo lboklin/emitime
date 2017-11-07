@@ -13,6 +13,20 @@ import Utils exposing (..)
 import Color exposing (..)
 
 
+-- MAIN
+
+
+main : Program Never Model Msg
+main =
+    Html.program
+        { init = ( initMetaModel, Task.perform WindowSize Window.size )
+        , view = view
+        , subscriptions = subscriptions
+        , update = update
+        }
+
+
+
 -- MODEL
 
 
@@ -33,18 +47,6 @@ initMetaModel =
     , recordedTime = 3 * second
     , windowSize = { width = 400, height = 400 }
     }
-
-
-type Msg
-    = KeyMsg KeyEvent
-    | WindowSize Size
-    | Tick Time
-    | Purge Time
-
-
-type KeyEvent
-    = KeyDown KeyCode
-    | KeyUp KeyCode
 
 
 type TimeFlow
@@ -100,36 +102,49 @@ isAction action key =
 -- UPDATE
 
 
+type Msg
+    = KeyMsg KeyEvent
+    | WindowSize Size
+    | Tick Time
+    | Purge Time
+
+
+type KeyEvent
+    = KeyDown KeyCode
+    | KeyUp KeyCode
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    let
-        processedMetaModel =
-            case msg of
-                KeyMsg keyEvent ->
-                    model |> keyInput keyEvent
+    case msg of
+        KeyMsg keyEvent ->
+            (model |> keyInput keyEvent)
+                ! []
 
-                WindowSize { width, height } ->
-                    { model | windowSize = Size width height }
+        WindowSize { width, height } ->
+            { model | windowSize = Size width height }
+                ! []
 
-                Tick dt ->
-                    let
-                        delta =
-                            case model.timeFlow of
-                                Normal ->
-                                    dt
+        Tick dt ->
+            (model |> tick (timeFlowDelta dt model.timeFlow))
+                ! []
 
-                                Paused ->
-                                    0
+        Purge _ ->
+            (model |> historyGC)
+                ! []
 
-                                Reversed ->
-                                    -dt
-                    in
-                        model |> tick delta
 
-                Purge _ ->
-                    model |> historyGC
-    in
-        ( processedMetaModel, Cmd.none )
+timeFlowDelta : Time -> TimeFlow -> Time
+timeFlowDelta dt timeFlow =
+    case timeFlow of
+        Normal ->
+            dt
+
+        Paused ->
+            0
+
+        Reversed ->
+            -dt
 
 
 
@@ -198,7 +213,6 @@ tick dt model =
 
 
 
--- updatePos : Float -> TimeFlow -> Vec2 -> Circle.Model -> Circle.Model
 -- Replace current model with the previous on in history and pop history
 
 
@@ -462,17 +476,3 @@ subscriptions model =
               -- , every (second / 5) Purge
             ]
                 ++ tickIfEventful
-
-
-
--- MAIN
-
-
-main : Program Never Model Msg
-main =
-    Html.program
-        { init = ( initMetaModel, Task.perform WindowSize Window.size )
-        , view = view
-        , subscriptions = subscriptions
-        , update = update
-        }
