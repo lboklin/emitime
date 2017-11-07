@@ -8,6 +8,7 @@ import Svg.Attributes as SvgA
 import Color exposing (..)
 import Color.Convert exposing (colorToCssRgb)
 import Utils exposing (..)
+import Keyboard exposing (KeyCode)
 
 
 -- MODEL
@@ -40,6 +41,48 @@ setColor color model =
 setSize : Int -> Model -> Model
 setSize size model =
     { model | size = size }
+
+
+
+-- UPDATE
+-- Update current position based on velocity
+
+
+updatePos : Float -> Vec2 -> Model -> Model
+updatePos dt bounds model =
+    let
+        perSecond x =
+            toFloat x * dt |> round
+
+        newX =
+            model.pos.x + perSecond model.vel.x
+
+        newY =
+            model.pos.y + perSecond model.vel.y
+
+        radius =
+            (model.size // 2) + 5
+    in
+        { model | pos = withinBounds bounds (Vec2 newX newY) radius }
+
+
+
+-- Restrict position to within the edges of the window
+
+
+withinBounds : Vec2 -> Vec2 -> Int -> Vec2
+withinBounds border vec radius =
+    let
+        bound end x =
+            clamp radius (end - radius) x
+
+        x_ =
+            bound border.x vec.x
+
+        y_ =
+            bound border.y vec.y
+    in
+        Position x_ y_
 
 
 
