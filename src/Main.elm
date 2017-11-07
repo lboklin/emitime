@@ -8,16 +8,17 @@ import Window exposing (Size)
 import Task
 import Time exposing (..)
 import Keyboard exposing (KeyCode, ups, downs)
-import Svg
-import Svg.Attributes as SvgA
+import Circle
+import Utils exposing (..)
+import Color exposing (..)
 
 
 -- MODEL
 
 
 type alias MetaModel =
-    { model : Model
-    , history : List ( Model, Msg )
+    { model : Circle.Model
+    , history : List ( Circle.Model, Msg )
     , timeFlow : TimeFlow
     , recordedTime : Time
     , windowSize : Size
@@ -26,28 +27,11 @@ type alias MetaModel =
 
 initMetaModel : MetaModel
 initMetaModel =
-    { model = initModel
+    { model = Circle.initModel
     , history = []
     , timeFlow = Normal
-    , recordedTime = 10 * second
+    , recordedTime = 3 * second
     , windowSize = { width = 400, height = 400 }
-    }
-
-
-type alias Model =
-    { pos : Position
-    , size : Int
-    , vel : Vec2
-    , time : Time
-    }
-
-
-initModel : Model
-initModel =
-    { pos = Position 200 200
-    , size = 50
-    , vel = { x = 0, y = 0 }
-    , time = 0
     }
 
 
@@ -67,18 +51,6 @@ type TimeFlow
     = Normal
     | Paused
     | Reversed
-
-
-type alias Position =
-    { x : Int
-    , y : Int
-    }
-
-
-type alias Vec2 =
-    { x : Int
-    , y : Int
-    }
 
 
 type alias KeyBindings =
@@ -289,7 +261,7 @@ withTimeFlow tf metaModel =
 -- The negative difference between current time and the time of the previous model
 
 
-timeDiffBack : List ( Model, Msg ) -> Time
+timeDiffBack : List ( Circle.Model, Msg ) -> Time
 timeDiffBack hist =
     let
         time a =
@@ -423,10 +395,10 @@ historyGC metaModel =
     { metaModel | history = validHistory metaModel }
 
 
-validHistory : MetaModel -> List ( Model, Msg )
+validHistory : MetaModel -> List ( Circle.Model, Msg )
 validHistory metaModel =
     let
-        notOld : Model -> Bool
+        notOld : Circle.Model -> Bool
         notOld x =
             metaModel.model.time - x.time < metaModel.recordedTime
     in
@@ -435,16 +407,6 @@ validHistory metaModel =
 
 
 -- VIEW
-
-
-(=>) : a -> a -> ( a, a )
-(=>) =
-    (,)
-
-
-px : Int -> String
-px x =
-    toString x ++ "px"
 
 
 view : MetaModel -> Html Msg
@@ -460,36 +422,21 @@ view metaModel =
         (nodes metaModel)
 
 
+withColor : Color -> Circle.Model -> Circle.Model
+withColor color model =
+    { model | color = color }
+
+
+withSize : Int -> Circle.Model -> Circle.Model
+withSize size model =
+    { model | size = size }
+
+
 nodes : MetaModel -> List (Html msg)
 nodes metaModel =
     List.concat
-        [ [ circle (metaModel.model.size // 2) metaModel.model.pos ]
-        , circleTrail metaModel
-        ]
-
-
-circle : Int -> Position -> Html msg
-circle r pos =
-    Html.div
-        [ Html.Attributes.style <|
-            [ "width" => px (r * 2)
-            , "height" => px (r * 2)
-            , "position" => "absolute"
-            , "left" => px (pos.x - r)
-            , "top" => px (pos.y - r)
-            ]
-        ]
-        [ Svg.svg
-            [ SvgA.viewBox "0 0 100 100"
-            ]
-            [ Svg.circle
-                [ SvgA.cx "50"
-                , SvgA.cy "50"
-                , SvgA.r "50"
-                , SvgA.fill "lightblue"
-                ]
-                []
-            ]
+        [ circleTrail metaModel
+        , [ Circle.view (metaModel.model |> withColor green) ]
         ]
 
 
@@ -497,7 +444,7 @@ circleTrail : MetaModel -> List (Html msg)
 circleTrail metaModel =
     let
         toCircle ( model, _ ) =
-            model.pos |> circle (model.size // 5)
+            Circle.view (model |> withColor charcoal |> withSize (model.size // 2))
     in
         metaModel |> validHistory |> List.map toCircle
 
