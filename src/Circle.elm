@@ -1,4 +1,4 @@
-module Circle exposing (Model, initModel, view, setColor, setSize)
+module Circle exposing (..)
 
 import Time exposing (..)
 import Html exposing (Html)

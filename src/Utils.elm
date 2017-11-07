@@ -1,5 +1,7 @@
 module Utils exposing (..)
 
+import Window exposing (Size)
+
 
 type alias Position =
     { x : Int
@@ -21,3 +23,8 @@ type alias Vec2 =
 px : Int -> String
 px x =
     toString x ++ "px"
+
+
+fromSize : Size -> Vec2
+fromSize size =
+    Vec2 size.width size.height

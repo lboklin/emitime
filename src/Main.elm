@@ -1,4 +1,4 @@
-module Main exposing (main)
+module Main exposing (..)
 
 import Html exposing (Html)
 import Html.Attributes
@@ -8,7 +8,7 @@ import Window exposing (Size)
 import Task
 import Time exposing (..)
 import Keyboard exposing (KeyCode, ups, downs)
-import Circle exposing (..)
+import Circle exposing (setColor, setSize)
 import Utils exposing (..)
 import Color exposing (..)
 
@@ -16,18 +16,18 @@ import Color exposing (..)
 -- MODEL
 
 
-type alias MetaModel =
-    { model : Model
-    , history : List ( Model, Msg )
+type alias Model =
+    { circleModel : Circle.Model
+    , history : List ( Circle.Model, Msg )
     , timeFlow : TimeFlow
     , recordedTime : Time
     , windowSize : Size
     }
 
 
-initMetaModel : MetaModel
+initMetaModel : Model
 initMetaModel =
-    { model = initModel
+    { circleModel = Circle.initModel
     , history = []
     , timeFlow = Normal
     , recordedTime = 3 * second
@@ -100,21 +100,21 @@ isAction action key =
 -- UPDATE
 
 
-update : Msg -> MetaModel -> ( MetaModel, Cmd Msg )
-update msg metaModel =
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
     let
         processedMetaModel =
             case msg of
                 KeyMsg keyEvent ->
-                    metaModel |> keyInput keyEvent
+                    model |> keyInput keyEvent
 
                 WindowSize { width, height } ->
-                    { metaModel | windowSize = Size width height }
+                    { model | windowSize = Size width height }
 
                 Tick dt ->
                     let
                         delta =
-                            case metaModel.timeFlow of
+                            case model.timeFlow of
                                 Normal ->
                                     dt
 
@@ -124,10 +124,10 @@ update msg metaModel =
                                 Reversed ->
                                     -dt
                     in
-                        metaModel |> tick delta
+                        model |> tick delta
 
                 Purge _ ->
-                    metaModel |> historyGC
+                    model |> historyGC
     in
         ( processedMetaModel, Cmd.none )
 
@@ -136,73 +136,84 @@ update msg metaModel =
 -- React to keyboard input
 
 
-keyInput : KeyEvent -> MetaModel -> MetaModel
-keyInput keyEvent metaModel =
+keyInput : KeyEvent -> Model -> Model
+keyInput keyEvent model =
     let
         msg =
             (KeyMsg keyEvent)
 
-        updateVelocity mMdl =
-            { mMdl | model = (mMdl.model |> motionInput keyEvent) }
+        updateVelocity mdl =
+            { mdl | circleModel = (mdl.circleModel |> motionInput keyEvent) }
     in
         case keyEvent of
             KeyDown key ->
                 if isAction keyBindings.rewind key then
-                    metaModel |> setTimeFlow Reversed
+                    model |> setTimeFlow Reversed
                 else
-                    metaModel |> setTimeFlow Normal |> modelToHistory msg |> updateVelocity
+                    model |> setTimeFlow Normal |> modelToHistory msg |> updateVelocity
 
             KeyUp key ->
                 if isAction keyBindings.rewind key then
-                    metaModel |> setTimeFlow Paused
+                    model |> setTimeFlow Paused
                 else
-                    metaModel |> modelToHistory msg |> updateVelocity |> pauseIfNotMoving
+                    model |> modelToHistory msg |> updateVelocity |> pauseIfNotMoving
 
 
 
 -- Update meta model in regards to time
 
 
-tick : Time -> MetaModel -> MetaModel
-tick dt metaModel =
+tick : Time -> Model -> Model
+tick dt model =
     let
-        withAddedTime dt0 mMdl =
+        withAddedTime dt0 mdl =
             let
-                timeAdd dt0 model =
-                    { model | time = model.time + dt0 }
+                timeAdd dt0 mdl =
+                    { mdl | time = mdl.time + dt0 }
             in
-                { mMdl | model = mMdl.model |> timeAdd dt0 }
+                { mdl | circleModel = mdl.circleModel |> timeAdd dt0 }
 
-        withTimeDirection mMdl =
-            case mMdl.timeFlow of
+        withTimeDirection mdl =
+            case mdl.timeFlow of
                 Normal ->
-                    mMdl |> withAddedTime dt |> modelToHistory (Tick dt)
+                    mdl |> withAddedTime dt |> modelToHistory (Tick dt)
 
                 Paused ->
-                    mMdl
+                    mdl
 
                 Reversed ->
-                    mMdl |> stepBack
+                    mdl |> stepBack
+
+        bounds =
+            model.windowSize |> fromSize
+
+        withNewPos mdl =
+            { mdl
+                | circleModel =
+                    mdl.circleModel
+                        |> updatePos dt mdl.timeFlow bounds
+            }
     in
-        metaModel |> withTimeDirection |> updatePos dt
+        model |> withTimeDirection |> withNewPos
 
 
 
+-- updatePos : Float -> TimeFlow -> Vec2 -> Circle.Model -> Circle.Model
 -- Replace current model with the previous on in history and pop history
 
 
-stepBack : MetaModel -> MetaModel
-stepBack metaModel =
+stepBack : Model -> Model
+stepBack model =
     let
         previousModel =
-            List.head metaModel.history
-                |> Maybe.withDefault ( metaModel.model, Tick 0 )
+            List.head model.history
+                |> Maybe.withDefault ( model.circleModel, Tick 0 )
                 |> Tuple.first
     in
         -- I'm not sure how to fix velocity getting stuck other than to reset it here
-        { metaModel
-            | model = { previousModel | vel = { x = 0, y = 0 } }
-            , history = Maybe.withDefault [] (List.tail metaModel.history)
+        { model
+            | circleModel = { previousModel | vel = { x = 0, y = 0 } }
+            , history = Maybe.withDefault [] (List.tail model.history)
         }
 
 
@@ -210,61 +221,61 @@ stepBack metaModel =
 -- When velocity is 0, pause time
 
 
-pauseIfNotMoving : MetaModel -> MetaModel
-pauseIfNotMoving mMdl =
-    if mMdl.model.vel /= Vec2 0 0 then
-        mMdl |> setTimeFlow Normal
+pauseIfNotMoving : Model -> Model
+pauseIfNotMoving mdl =
+    if mdl.circleModel.vel /= Vec2 0 0 then
+        mdl |> setTimeFlow Normal
     else
-        mMdl |> setTimeFlow Paused
+        mdl |> setTimeFlow Paused
 
 
 
 -- When position hasn't changed since last iteration, pause time
 
 
-pauseIfNotMoving_ : MetaModel -> MetaModel
-pauseIfNotMoving_ mMdl =
+pauseIfNotMoving_ : Model -> Model
+pauseIfNotMoving_ model =
     let
         currentPos =
-            mMdl.model.pos
+            model.circleModel.pos
 
         lastPos =
-            case mMdl.history of
+            case model.history of
                 [] ->
-                    mMdl.model.pos
+                    model.circleModel.pos
 
                 x :: _ ->
                     (Tuple.first x).pos
     in
         if currentPos /= lastPos then
-            mMdl |> setTimeFlow Normal
+            model |> setTimeFlow Normal
         else
-            mMdl |> setTimeFlow Paused
+            model |> setTimeFlow Paused
 
 
 
 -- Push current model onto the history stack
 
 
-modelToHistory : Msg -> MetaModel -> MetaModel
-modelToHistory msg metaModel =
-    { metaModel | history = ( metaModel.model, msg ) :: (validHistory metaModel) }
+modelToHistory : Msg -> Model -> Model
+modelToHistory msg model =
+    { model | history = ( model.circleModel, msg ) :: (validHistory model) }
 
 
 
 -- Setter for the flow of time
 
 
-setTimeFlow : TimeFlow -> MetaModel -> MetaModel
-setTimeFlow tf metaModel =
-    { metaModel | timeFlow = tf }
+setTimeFlow : TimeFlow -> Model -> Model
+setTimeFlow tf model =
+    { model | timeFlow = tf }
 
 
 
 -- The negative difference between current time and the time of the previous model
 
 
-timeDiffBack : List ( Model, Msg ) -> Time
+timeDiffBack : List ( Circle.Model, Msg ) -> Time
 timeDiffBack hist =
     let
         time a =
@@ -285,16 +296,13 @@ timeDiffBack hist =
 -- Update current position based on velocity
 
 
-updatePos : Float -> MetaModel -> MetaModel
-updatePos dt metaModel =
+updatePos : Float -> TimeFlow -> Vec2 -> Circle.Model -> Circle.Model
+updatePos dt timeFlow bounds model =
     let
-        model =
-            metaModel.model
-
         perSecond x =
             let
                 delta =
-                    case metaModel.timeFlow of
+                    case timeFlow of
                         Normal ->
                             dt
 
@@ -311,42 +319,37 @@ updatePos dt metaModel =
 
         newY =
             model.pos.y + perSecond model.vel.y
+
+        radius =
+            (model.size // 2) + 5
     in
-        metaModel |> withinBounds newX newY 5
+        { model | pos = withinBounds bounds (Vec2 newX newY) radius }
 
 
 
 -- Restrict position to within the edges of the window
 
 
-withinBounds : Int -> Int -> Int -> MetaModel -> MetaModel
-withinBounds x y padding metaModel =
+withinBounds : Vec2 -> Vec2 -> Int -> Vec2
+withinBounds border vec radius =
     let
-        model =
-            metaModel.model
-
-        collisionRadius =
-            (model.size // 2) + padding
-
         bound end x =
-            clamp (collisionRadius) (end - collisionRadius) x
+            clamp radius (end - radius) x
 
-        newModel =
-            { model
-                | pos =
-                    Position
-                        (bound metaModel.windowSize.width x)
-                        (bound metaModel.windowSize.height y)
-            }
+        x_ =
+            bound border.x vec.x
+
+        y_ =
+            bound border.y vec.y
     in
-        { metaModel | model = newModel }
+        Position x_ y_
 
 
 
 -- Set next velocity based on keyboard input
 
 
-motionInput : KeyEvent -> Model -> Model
+motionInput : KeyEvent -> Circle.Model -> Circle.Model
 motionInput keyEvent model =
     let
         ( speed, keycode ) =
@@ -390,64 +393,64 @@ motionInput keyEvent model =
 -- Clean up the history from entries that are too old
 
 
-historyGC : MetaModel -> MetaModel
-historyGC metaModel =
-    { metaModel | history = validHistory metaModel }
+historyGC : Model -> Model
+historyGC model =
+    { model | history = validHistory model }
 
 
-validHistory : MetaModel -> List ( Model, Msg )
-validHistory metaModel =
+validHistory : Model -> List ( Circle.Model, Msg )
+validHistory model =
     let
-        notOld : Model -> Bool
+        notOld : Circle.Model -> Bool
         notOld x =
-            metaModel.model.time - x.time < metaModel.recordedTime
+            model.circleModel.time - x.time < model.recordedTime
     in
-        List.filter (notOld << Tuple.first) metaModel.history
+        List.filter (notOld << Tuple.first) model.history
 
 
 
 -- VIEW
 
 
-view : MetaModel -> Html Msg
-view metaModel =
+view : Model -> Html Msg
+view model =
     Html.div
         [ Html.Attributes.style <|
-            [ "width" => ((metaModel.windowSize.width |> toString) ++ "px")
-            , "height" => ((metaModel.windowSize.height |> toString) ++ "px")
+            [ "width" => ((model.windowSize.width |> toString) ++ "px")
+            , "height" => ((model.windowSize.height |> toString) ++ "px")
             , "display" => "block"
             , "background-color" => "#2d2d2d"
             ]
         ]
-        (nodes metaModel)
+        (nodes model)
 
 
-nodes : MetaModel -> List (Html msg)
-nodes metaModel =
+nodes : Model -> List (Html msg)
+nodes model =
     List.concat
-        [ circleTrail metaModel
-        , [ Circle.view (metaModel.model |> setColor green) ]
+        [ circleTrail model
+        , [ Circle.view (model.circleModel |> setColor green) ]
         ]
 
 
-circleTrail : MetaModel -> List (Html msg)
-circleTrail metaModel =
+circleTrail : Model -> List (Html msg)
+circleTrail model =
     let
         toCircle ( model, _ ) =
             Circle.view (model |> setColor charcoal |> setSize (model.size // 2))
     in
-        metaModel |> validHistory |> List.map toCircle
+        model |> validHistory |> List.map toCircle
 
 
 
 -- SUBSCRIPTIONS
 
 
-subscriptions : MetaModel -> Sub Msg
-subscriptions metaModel =
+subscriptions : Model -> Sub Msg
+subscriptions model =
     let
         tickIfEventful =
-            if metaModel.timeFlow /= Paused then
+            if model.timeFlow /= Paused then
                 [ AnimationFrame.diffs Tick ]
             else
                 []
@@ -465,7 +468,7 @@ subscriptions metaModel =
 -- MAIN
 
 
-main : Program Never MetaModel Msg
+main : Program Never Model Msg
 main =
     Html.program
         { init = ( initMetaModel, Task.perform WindowSize Window.size )
